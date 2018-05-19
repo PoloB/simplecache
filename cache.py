@@ -1,9 +1,9 @@
-from repoze.lru import LRUCache
 
 
 class CacheContainer(object):
     """This class is a container that stores cache content.
     This the class manipulated by the CacheManager."""
+
     def __init__(self, cache_content):
         self._content = cache_content
 
@@ -13,54 +13,121 @@ class CacheContainer(object):
         return self._content
 
 
-class CacheManager(object):
+class ClassCacheManager(object):
+    __kwd_mark = object()
+    container = CacheContainer
 
-    kwd_mark = object()
-
-    def __init__(self):
+    def __init__(self, keys, keys_from_cached_func):
         """Creates a cache manager."""
 
+        self._enabled = True
+        self._keys = keys
         self._cache_content = {}
+        self._prim_id_for_second_id = {}
+        self._condition_cache = {}
+        self._keys_from_cached_func = keys_from_cached_func
 
-    def cache(self, hash_function=None):
-        """If hash_function is provided it will be used to craft the cache key
-        the inputs. If not, the craft key will be crafted considering all inputs
-        are hashable objects."""
-        def decorator(long_func):
-            def wrapper(*args, **kwargs):
+    def craft_key(self, key, args, kwargs):
 
+        assert isinstance(key, tuple), (type(key), key)
+        assert key in self._keys, (key, self._keys)
+
+        tup = list()
+
+        args_count = 0
+        for k in key:
+
+            if k in kwargs:
+                tup.append(kwargs[k])
+
+            else:
+                tup.append(args[args_count])
+                args_count += 1
+
+        return tuple(tup)
+
+    def cache_inst_from_key(self, key):
+        def decorator(func):
+            def wrapper(cls, *args, **kwargs):
                 # Craft the cache key from hashable inputs
-                if hash_function:
-                    key = hash_function(*args, **kwargs)
-                else:
-                    key = args + (CacheManager.kwd_mark,) + tuple(
-                        sorted(kwargs.items()))
-                cache_key = (long_func.__name__, key)
+                cache_key = self.craft_key(key, args, kwargs)
 
                 # Try to retrieve from cache
+                if key != self._keys[0]:
+                    # It's a secondary key
+                    cache_key = self._prim_id_for_second_id[(key, cache_key)]
+
                 if cache_key in self._cache_content:
                     return self._cache_content[cache_key].content
 
-                # We couldn't retrieve from cache, we have to do the long stuff
-                my_precious = long_func(*args, **kwargs)
+                # We couldn't retrieve from cache, let's instantiate
+                res = func(cls, *args, **kwargs)
 
-                # We create a container for the cache and cache it
-                self._cache_content[cache_key] = CacheContainer(my_precious)
+                # Get the keys from the result of the function
+                keys = self._keys_from_cached_func(res)
 
-                return my_precious
+                # Caching using the primary key
+                prim_key = keys[0]
+                self._cache_content[prim_key] = ClassCacheManager.container(res)
+
+                # Add the other keys in the cache
+                for i, k in enumerate(keys[1:]):
+                    second_key = (self._keys[i + 1], k)
+                    self._prim_id_for_second_id[second_key] = prim_key
+
+                # Return the content of the cache
+                return self._cache_content[prim_key].content
 
             return wrapper
+
         return decorator
 
-    def reset_cache(self):
-        self._cache_content = {}
+    def cache_inst_from_condition(self):
+        def decorator(func):
+            def wrapper(cls, *args, **kwargs):
+                # Craft the cache key from hashable inputs
+                args_key = args + (ClassCacheManager.__kwd_mark,) + \
+                           tuple(sorted(kwargs.items()))
+                cache_key = (func.__name__, args_key)
 
-    def is_empty(self):
-        if len(self._cache_content) == 0:
-            return True
-        return False
+                # Try to retrieve from cache
+                if cache_key in self._condition_cache:
+                    list_prim_keys = self._condition_cache[cache_key].content
+                    return [self._cache_content[pk] for pk in list_prim_keys]
 
-    def set_enabled(self, value):
-        self._enabled = value
+                # We couldn't retrieve from cache, let's instantiate
+                list_res = func(cls, *args, **kwargs)
 
+                insts_to_return = []
 
+                # Get the keys from the result of the function
+                for r in list_res:
+
+                    keys = self._keys_from_cached_func(r)
+
+                    # Caching using the primary key
+                    prim_key = keys[0]
+
+                    # The instance is already in cache
+                    if prim_key in self._cache_content:
+                        insts_to_return.append(
+                            self._cache_content[prim_key].content)
+                        continue
+
+                    self._cache_content[prim_key] = \
+                        ClassCacheManager.container(r)
+
+                    # Add the other keys in the cache
+                    for i, k in enumerate(keys[1:]):
+                        second_key = (self._keys[i + 1], k)
+                        self._prim_id_for_second_id[second_key] = prim_key
+
+                    # Appends the cached instance to the result
+                    insts_to_return.append(
+                        self._cache_content[prim_key].content)
+
+                return insts_to_return
+
+            return wrapper
+
+        return decorator
