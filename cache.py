@@ -14,7 +14,7 @@ class CacheContainer(object):
 
 
 class ClassCacheManager(object):
-    __kwd_mark = object()
+    _kwd_mark = object()
     container = CacheContainer
 
     def __init__(self, keys, keys_from_cached_func):
@@ -46,6 +46,28 @@ class ClassCacheManager(object):
 
         return tuple(tup)
 
+    def _insert_inst_in_cache(self, inst):
+
+        # Get the keys from the result of the function
+        keys = self._keys_from_cached_func(inst)
+
+        # Caching using the primary key
+        prim_key = keys[0]
+
+        # Make sure it's not in cache already
+        if prim_key in self._cache_content:
+            return self._cache_content[prim_key].content
+
+        self._cache_content[prim_key] = ClassCacheManager.container(inst)
+
+        # Add the other keys in the cache
+        for i, k in enumerate(keys[1:]):
+            second_key = (self._keys[i + 1], k)
+            self._prim_id_for_second_id[second_key] = prim_key
+
+        # Return the content of the cache
+        return self._cache_content[prim_key].content
+
     def cache_inst_from_key(self, key):
         def decorator(func):
             def wrapper(cls, *args, **kwargs):
@@ -63,20 +85,7 @@ class ClassCacheManager(object):
                 # We couldn't retrieve from cache, let's instantiate
                 res = func(cls, *args, **kwargs)
 
-                # Get the keys from the result of the function
-                keys = self._keys_from_cached_func(res)
-
-                # Caching using the primary key
-                prim_key = keys[0]
-                self._cache_content[prim_key] = ClassCacheManager.container(res)
-
-                # Add the other keys in the cache
-                for i, k in enumerate(keys[1:]):
-                    second_key = (self._keys[i + 1], k)
-                    self._prim_id_for_second_id[second_key] = prim_key
-
-                # Return the content of the cache
-                return self._cache_content[prim_key].content
+                return self._insert_inst_in_cache(res)
 
             return wrapper
 
@@ -85,49 +94,50 @@ class ClassCacheManager(object):
     def cache_inst_from_condition(self):
         def decorator(func):
             def wrapper(cls, *args, **kwargs):
-                # Craft the cache key from hashable inputs
-                args_key = args + (ClassCacheManager.__kwd_mark,) + \
-                           tuple(sorted(kwargs.items()))
-                cache_key = (func.__name__, args_key)
 
-                # Try to retrieve from cache
-                if cache_key in self._condition_cache:
-                    list_prim_keys = self._condition_cache[cache_key].content
-                    return [self._cache_content[pk] for pk in list_prim_keys]
+                class CacheCallWrapper(object):
+                    @staticmethod
+                    def get():
+                        # Craft the cache key from hashable inputs
+                        args_key = args + (ClassCacheManager._kwd_mark,) + \
+                                   tuple(sorted(kwargs.items()))
+                        cache_key = (func.__name__, args_key)
 
-                # We couldn't retrieve from cache, let's instantiate
-                list_res = func(cls, *args, **kwargs)
+                        # Try to retrieve from cache
+                        if cache_key in self._condition_cache:
+                            list_prim_keys = self._condition_cache[cache_key].content
+                            for pk in list_prim_keys:
+                                yield self._cache_content[pk]
 
-                insts_to_return = []
+                        # We couldn't retrieve from cache, let's instantiate
+                        list_res = func(cls, *args, **kwargs)
 
-                # Get the keys from the result of the function
-                for r in list_res:
+                        # Get the keys from the result of the function
+                        for r in list_res:
 
-                    keys = self._keys_from_cached_func(r)
+                            # Appends the cached instance to the result
+                            yield self._insert_inst_in_cache(r)
 
-                    # Caching using the primary key
-                    prim_key = keys[0]
-
-                    # The instance is already in cache
-                    if prim_key in self._cache_content:
-                        insts_to_return.append(
-                            self._cache_content[prim_key].content)
-                        continue
-
-                    self._cache_content[prim_key] = \
-                        ClassCacheManager.container(r)
-
-                    # Add the other keys in the cache
-                    for i, k in enumerate(keys[1:]):
-                        second_key = (self._keys[i + 1], k)
-                        self._prim_id_for_second_id[second_key] = prim_key
-
-                    # Appends the cached instance to the result
-                    insts_to_return.append(
-                        self._cache_content[prim_key].content)
-
-                return insts_to_return
-
+                return CacheCallWrapper
             return wrapper
 
+        return decorator
+
+    def insert(self):
+        def decorator(func):
+            def wrapper(cls, *args, **kwargs):
+
+                inst = func(cls, *args, **kwargs)
+
+                if not inst:
+                    return inst
+
+                inst = self._insert_inst_in_cache(inst)
+
+                # Invalidate the condition cache
+                self._condition_cache = {}
+
+                return inst
+
+            return wrapper
         return decorator
