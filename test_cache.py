@@ -13,11 +13,10 @@ class CacheTest(object):
     # Cache related stuff
     keys = [('id',), ('name', 'type')]
 
-    @staticmethod
-    def key_from_inst(inst):
-        return (inst.uid,), (inst.name, inst.type)
+    def key_from_inst(self):
+        return (self.uid,), (self.name, self.type)
 
-    cache = ClassCache(keys, key_from_inst.__func__)
+    cache = ClassCache(keys, key_from_inst)
 
     # Getters
     @classmethod
