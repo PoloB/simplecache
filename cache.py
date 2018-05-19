@@ -252,6 +252,9 @@ class CacheClassType(object):
         """
 
         # Get the keys from the result of the function
+        if not isinstance(inst, cls):
+            return inst
+
         keys = inst.keys_from_inst()
 
         # Caching using the primary key
@@ -270,6 +273,26 @@ class CacheClassType(object):
 
         # Return the content of the cache
         return cls._cache_content[prim_key].content
+
+    @classmethod
+    def _remove_from_cache(cls, inst):
+
+        # Get the keys from the result of the function
+        keys = inst.keys_from_inst()
+
+        # Get primary key
+        prim_key = cls.__modify_key(keys[0])
+
+        # Remove from main cache
+        if prim_key in cls._cache_content:
+            cls._cache_content.pop([prim_key])
+        else:
+            return
+
+        # Add the other keys in the cache
+        for i, k in enumerate(keys[1:]):
+            second_key = cls.__modify_key((cls.keys[i + 1], k))
+            cls._prim_id_for_second_id[second_key] = prim_key
 
     @staticmethod
     def cache_inst_from_key(key):
@@ -290,13 +313,19 @@ class CacheClassType(object):
                 if key != cls.keys[0]:
                     # It's a secondary key
                     second_key = cls.__modify_key((key, cache_key))
-                    cache_key = cls._prim_id_for_second_id[second_key]
+
+                    try:
+                        cache_key = cls._prim_id_for_second_id[second_key]
+                    except KeyError:
+                        cache_key = None
 
                 if cache_key in cls._cache_content:
                     return cls._cache_content[cache_key].content
 
                 # We couldn't retrieve from cache, let's instantiate
                 res = func(cls, *args, **kwargs)
+                if not isinstance(res, cls):
+                    return
 
                 return cls._insert_inst_in_cache(res)
 
@@ -354,5 +383,22 @@ class CacheClassType(object):
             cls._condition_cache = {}
 
             return inst
+
+        return wrapper
+
+    @staticmethod
+    def remove(func):
+        def wrapper(self, *args, **kwargs):
+
+            # Execute the function
+            res = func(self, *args, **kwargs)
+
+            # Remove from cache
+            self._remove_from_cache(self)
+
+            # Invalidate the condition cache
+            self._condition_cache = {}
+
+            return res
 
         return wrapper
