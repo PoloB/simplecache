@@ -13,13 +13,13 @@ class CacheContainer(object):
         return self._content
 
 
-class ClassCacheManager(object):
+class ClassCache(object):
     _kwd_mark = object()
-    container = CacheContainer
 
-    def __init__(self, keys, keys_from_cached_func):
+    def __init__(self, keys, keys_from_cached_func, container=CacheContainer):
         """Creates a cache manager."""
 
+        self._container = container
         self._enabled = True
         self._keys = keys
         self._cache_content = {}
@@ -58,7 +58,7 @@ class ClassCacheManager(object):
         if prim_key in self._cache_content:
             return self._cache_content[prim_key].content
 
-        self._cache_content[prim_key] = ClassCacheManager.container(inst)
+        self._cache_content[prim_key] = self._container(inst)
 
         # Add the other keys in the cache
         for i, k in enumerate(keys[1:]):
@@ -95,11 +95,11 @@ class ClassCacheManager(object):
         def decorator(func):
             def wrapper(cls, *args, **kwargs):
 
-                class CacheCallWrapper(object):
+                class CacheWrapper(object):
                     @staticmethod
                     def get():
                         # Craft the cache key from hashable inputs
-                        args_key = args + (ClassCacheManager._kwd_mark,) + \
+                        args_key = args + (ClassCache._kwd_mark,) + \
                                    tuple(sorted(kwargs.items()))
                         cache_key = (func.__name__, args_key)
 
@@ -118,7 +118,7 @@ class ClassCacheManager(object):
                             # Appends the cached instance to the result
                             yield self._insert_inst_in_cache(r)
 
-                return CacheCallWrapper
+                return CacheWrapper
             return wrapper
 
         return decorator
@@ -141,3 +141,7 @@ class ClassCacheManager(object):
 
             return wrapper
         return decorator
+
+
+class CacheManager(object):
+    """This class can manage a cache."""

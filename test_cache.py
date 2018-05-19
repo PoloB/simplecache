@@ -1,6 +1,6 @@
 
 import unittest
-from cache import ClassCacheManager
+from cache import ClassCache
 
 
 test_data = [{'id': 0, 'name': "num0", 'type': "int", 'value': 13},
@@ -17,7 +17,7 @@ class CacheTest(object):
     def key_from_inst(inst):
         return (inst.uid,), (inst.name, inst.type)
 
-    cache = ClassCacheManager(keys, key_from_inst.__func__)
+    cache = ClassCache(keys, key_from_inst.__func__)
 
     # Getters
     @classmethod
