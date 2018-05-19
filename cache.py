@@ -1,8 +1,9 @@
 
 
 class CacheContainer(object):
-    """This class is a container that stores cache content.
-    This the class manipulated by the CacheManager."""
+    """This class is a container that stores cache content and other metadata.
+    You may override this class to create new methods to access custom data.
+    """
 
     def __init__(self, cache_content):
         self._content = cache_content
@@ -14,10 +15,60 @@ class CacheContainer(object):
 
 
 class ClassCache(object):
+    """Main cache object. Each instance of this class provides decorators to
+    cache the result of class methods.
+    It's main purpose is to cache the instantiation process."""
+
     _kwd_mark = object()
 
-    def __init__(self, keys, keys_from_cached_func, container=CacheContainer):
-        """Creates a cache manager."""
+    class CacheWrapper(object):
+
+        def __init__(self, args, kwargs, func, cls,
+                     cache):
+
+            self._args = args
+            self._kwargs = kwargs
+            self._func = func
+            self._cls = cls
+            self._cache = cache
+
+        def get(self):
+            # Craft the cache key from hashable inputs
+            args_key = self._args + (ClassCache._kwd_mark,) + \
+                       tuple(sorted(self._kwargs.items()))
+            cache_key = (self._func.__name__, args_key)
+
+            # Try to retrieve from cache
+            if cache_key in self._cache._condition_cache:
+                list_prim_keys = self._cache._condition_cache[
+                    cache_key].content
+                for pk in list_prim_keys:
+                    yield self._cache[pk]
+
+            # We couldn't retrieve from cache, let's instantiate
+            list_res = self._func(self._cls, *self._args, **self._kwargs)
+
+            # Get the keys from the result of the function
+            for r in list_res:
+                # Appends the cached instance to the result
+                yield self._cache._insert_inst_in_cache(r)
+
+        def __iter__(self):
+            return self.get()
+
+        def __repr__(self):
+            return list(self.get()).__repr__()
+
+    def __init__(self, keys, keys_from_cached_instance,
+                 container=CacheContainer):
+        """Creates a cache manager.
+
+        Args:
+            keys (list of tuple): key tuple names of the instance.
+                All the instance shall have a an unique value for each key.
+            keys_from_cached_instance (func): function that returns the keys
+                from an instance.
+            container (class object): Class to use to store the cache."""
 
         self._container = container
         self._enabled = True
@@ -25,9 +76,10 @@ class ClassCache(object):
         self._cache_content = {}
         self._prim_id_for_second_id = {}
         self._condition_cache = {}
-        self._keys_from_cached_func = keys_from_cached_func
+        self._keys_from_cached_func = keys_from_cached_instance
 
-    def craft_key(self, key, args, kwargs):
+    def _craft_key(self, key, args, kwargs):
+        """Craft the given key from the given args and kwargs."""
 
         assert isinstance(key, tuple), (type(key), key)
         assert key in self._keys, (key, self._keys)
@@ -47,6 +99,14 @@ class ClassCache(object):
         return tuple(tup)
 
     def _insert_inst_in_cache(self, inst):
+        """Inserts the given instance in the cache.
+
+        Args:
+            inst (object): instance to insert in the cache
+
+        Returns:
+            object: instance from the cache.
+        """
 
         # Get the keys from the result of the function
         keys = self._keys_from_cached_func(inst)
@@ -69,10 +129,18 @@ class ClassCache(object):
         return self._cache_content[prim_key].content
 
     def cache_inst_from_key(self, key):
+        """Cache the decorated function using the given key.
+
+        Args:
+            key: key on which to cache
+
+        Returns:
+            instance
+        """
         def decorator(func):
             def wrapper(cls, *args, **kwargs):
                 # Craft the cache key from hashable inputs
-                cache_key = self.craft_key(key, args, kwargs)
+                cache_key = self._craft_key(key, args, kwargs)
 
                 # Try to retrieve from cache
                 if key != self._keys[0]:
@@ -92,33 +160,15 @@ class ClassCache(object):
         return decorator
 
     def cache_inst_from_condition(self):
+        """Conditional cache decorator.
+        Wraps the result function call into a CacheWrapper object.
+        Every call to the CacheWrapper.get() method will return
+        the function result or the cache content if available.
+        """
+
         def decorator(func):
             def wrapper(cls, *args, **kwargs):
-
-                class CacheWrapper(object):
-                    @staticmethod
-                    def get():
-                        # Craft the cache key from hashable inputs
-                        args_key = args + (ClassCache._kwd_mark,) + \
-                                   tuple(sorted(kwargs.items()))
-                        cache_key = (func.__name__, args_key)
-
-                        # Try to retrieve from cache
-                        if cache_key in self._condition_cache:
-                            list_prim_keys = self._condition_cache[cache_key].content
-                            for pk in list_prim_keys:
-                                yield self._cache_content[pk]
-
-                        # We couldn't retrieve from cache, let's instantiate
-                        list_res = func(cls, *args, **kwargs)
-
-                        # Get the keys from the result of the function
-                        for r in list_res:
-
-                            # Appends the cached instance to the result
-                            yield self._insert_inst_in_cache(r)
-
-                return CacheWrapper
+                return ClassCache.CacheWrapper(args, kwargs, func, cls, self)
             return wrapper
 
         return decorator

@@ -121,11 +121,11 @@ class TestCache(unittest.TestCase):
 
         insts = CacheTest.from_type('int')
 
-        assert inst1 in insts.get()
+        assert inst1 in insts
 
         insts = CacheTest.from_type('int')
 
-        assert inst1 in insts.get()
+        assert inst1 in insts
 
     def test_update(self):
 
@@ -138,7 +138,7 @@ class TestCache(unittest.TestCase):
 
         assert inst1 is inst2
         assert inst1.value == inst2.value
-        assert inst1 in insts.get()
+        assert inst1 in insts
 
     def test_insertion(self):
 
@@ -146,8 +146,8 @@ class TestCache(unittest.TestCase):
 
         insts = CacheTest.from_value(13)
 
-        assert inst in insts.get()
+        assert inst in insts
 
         new_inst = CacheTest.create(5, 'test_name', 'int', 13)
 
-        assert new_inst in insts.get()
+        assert new_inst in insts
