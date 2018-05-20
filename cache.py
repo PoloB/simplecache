@@ -1,5 +1,4 @@
 
-
 class CacheContainer(object):
     """This class is a container that stores cache content and other metadata.
     You may override this class to create new methods to access custom data.
@@ -213,6 +212,26 @@ class CacheClassType(object):
             return list(self._wrap_func()).__repr__()
 
     def keys_from_inst(self):
+        """You must override this function to tell the cache how to
+        get the cache key from an instance of the cache class.
+        You must return a list of tuple of the same size as
+        the keys class attribute. To each key shall correspond its instance
+        value.
+
+        For example, if
+
+        keys = [('id',),
+        ('name', 'type'),
+        ('other_key')]
+
+        keys_from_inst must return a list like this:
+
+        return [(id_inst_value,),
+        (name_inst_value, type_inst_value),
+        (other_key_inst_value)]
+
+        You may also customize the key to fit your needs in this function.
+        """
         raise NotImplementedError()
 
     @classmethod
@@ -239,6 +258,13 @@ class CacheClassType(object):
                 args_count += 1
 
         return tuple(tup)
+
+    def _get_prim_key(self):
+        keys = self.keys_from_inst()
+
+        # Caching using the primary key
+        prim_key = self.__modify_key(keys[0])
+        return prim_key
 
     @classmethod
     def _insert_inst_in_cache(cls, inst):
@@ -402,3 +428,30 @@ class CacheClassType(object):
             return res
 
         return wrapper
+
+
+class SessionCacheClassType(CacheClassType):
+
+    def keys_from_inst(self):
+        raise NotImplementedError()
+
+    __session_key__ = 'sid'
+    _prim_id_for_session_key = {}
+
+    @classmethod
+    def from_session_id(cls, sid):
+        try:
+            return cls._cache_content[cls._prim_id_for_session_key[sid]]
+        except KeyError:
+            return None
+
+    def set_session_id(self, sid):
+        self._session_id = sid
+        self._prim_id_for_session_key[sid] = self._get_prim_key()
+
+    def remove_session_id(self):
+        if self._session_id:
+            self._prim_id_for_session_key.pop(self._session_id)
+
+    def __init__(self):
+        self._session_id = None

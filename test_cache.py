@@ -198,9 +198,11 @@ class CacheTest2(CacheClassType):
 
     # Cache related stuff
     keys = [('id',), ('name', 'type')]
+    _current_ = 'test'
 
     def keys_from_inst(self):
-        return (self.uid,), (self.name, self.type)
+        return (self._current_, self.uid,),\
+               (self._current_, self.name, self.type)
 
     # Getters
     @classmethod
