@@ -1,6 +1,7 @@
 
 import weakref
 
+
 class CacheContainer(object):
     """This class is a container that stores cache content and other metadata.
     You may override this class to create new methods to access custom data.
@@ -49,6 +50,9 @@ class CacheClassType(object):
     _cache_content = {}
     _cache_for_second_id = weakref.WeakValueDictionary()
     _condition_cache = {}
+
+    class InstanceNotValid(Exception):
+        pass
 
     class CacheWrapper(object):
 
@@ -220,8 +224,12 @@ class CacheClassType(object):
 
                 # We couldn't retrieve from cache, let's instantiate
                 res = func(cls, *args, **kwargs)
+
+                # Just return result
                 if not isinstance(res, cls):
-                    return
+                    msg = "You must return an instance of type {0} from the " \
+                          "function {1}".format(cls.__name__, func.__name__)
+                    raise CacheClassType.InstanceNotValid(msg)
 
                 return cls._insert_inst_in_cache(res)
 

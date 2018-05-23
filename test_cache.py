@@ -33,6 +33,12 @@ class CacheTest(CacheClassType):
 
     @classmethod
     @CacheClassType.cache_inst_from_key('id')
+    def from_id_wrong(cls, uid):
+
+        return 'wrong_output'
+
+    @classmethod
+    @CacheClassType.cache_inst_from_key('id')
     def from_ids(cls, uids):
 
         for d in test_data:
@@ -135,6 +141,12 @@ class SessionCacheTest(CacheTest, SessionCacheClassType):
 
 
 class TestCache(unittest.TestCase):
+
+    def test_wrong_programming(self):
+
+        # Test a function that does not return what's expected
+        with self.assertRaises(CacheTest.InstanceNotValid):
+            CacheTest.from_id_wrong(-1)
 
     def test_cache_retrieval(self):
         # Test caching works
