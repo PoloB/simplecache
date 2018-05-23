@@ -1,4 +1,6 @@
 
+import weakref
+
 class CacheContainer(object):
     """This class is a container that stores cache content and other metadata.
     You may override this class to create new methods to access custom data.
@@ -14,16 +16,38 @@ class CacheContainer(object):
 
 
 class CacheClassType(object):
-    """Main cache object. Each instance of this class provides decorators to
-    cache the result of class methods.
-    It's main purpose is to cache the instantiation process.
+    """Main cache object.
+    Each class that inherits from this class can cache the construction of its
+    instances using the class method decorators.
+
+    In order to make use of the cache, you must implements
+    the following methods in the child class:
+
+    - keys_names:
+        This class method shall return the keys' name used for caching.
+
+    - keys_from_inst:
+        This instance method shall return the cache keys from the instance.
+
+    Then, it is possible to use the following decorators on class method
+    constructors:
+
+    - cache_inst_from_key:
+        The decorator returns the cached instance from the arguments of the
+        decorated method if possible. Otherwise, it executes the decorated
+        function, expecting the corresponding instance as returned value.
+        You must always return a generator from the decorated function.
+
+
+    - cache_inst_from_condition:
+
     """
 
     _kwd_mark = object()
 
     _container = CacheContainer
     _cache_content = {}
-    _prim_id_for_second_id = {}
+    _cache_for_second_id = weakref.WeakValueDictionary()
     _condition_cache = {}
 
     class CacheWrapper(object):
@@ -47,14 +71,20 @@ class CacheClassType(object):
             return list(self._wrap_func()).__repr__()
 
     @classmethod
-    def keys(cls):
-        """This method should a generator on keys."""
+    def delete_cache(cls):
+        cls._condition_cache = {}
+        cls._prim_id_for_second_id = weakref.WeakValueDictionary()
+        cls._cache_content = {}
+
+    @classmethod
+    def keys_names(cls):
+        """This method should a generator on keys of type string."""
         raise NotImplementedError()
 
     def keys_from_inst(self):
         """You must override this function to tell the cache how to
         get the cache key from an instance of the cache class.
-        You must return a generator of tuple.
+        You must return a generator string.
         You must yield the keys of the instance in the same order as
         the CacheClassType.keys does.
 
@@ -75,47 +105,36 @@ class CacheClassType(object):
         raise NotImplementedError()
 
     def get_cache_keys(self):
-        """Returns a generator cache keys for this instance."""
+        """Returns a generator of the cache keys for this instance."""
 
         keys = self.keys_from_inst()
-        cache_keys = self.keys()
+        cache_keys = self.keys_names()
 
-        # Proccess primary id
+        # Process primary id
         cache_keys.__next__()
-        yield tuple(sk for sk in keys.__next__())
+        yield keys.__next__()
 
         # Do other keys
         for key in keys:
             ck = cache_keys.__next__()
-            skey = [sk for sk in key]
 
             # If one of the sub index is None, we skip
-            if None in skey:
+            if key is None:
                 continue
 
-            yield self._modify_key((ck, tuple(skey)))
+            yield self._add_class_name_to_key((ck, key))
 
     @classmethod
-    def _modify_key(cls, input_key):
+    def _add_class_name_to_key(cls, input_key):
         return cls.__name__, input_key
 
     @classmethod
-    def __craft_key(cls, key, args, kwargs):
+    def __craft_key_with_args(cls, key, args, kwargs):
         """Craft the given key from the given args and kwargs."""
 
-        tup = list()
-
-        args_count = 0
-        for k in key:
-
-            if k in kwargs:
-                tup.append(kwargs[k])
-
-            else:
-                tup.append(args[args_count])
-                args_count += 1
-
-        return tuple(tup)
+        args_key = (key, args + (cls._kwd_mark,) +
+                    tuple(sorted(kwargs.items())))
+        return args_key
 
     @classmethod
     def _insert_inst_in_cache(cls, inst):
@@ -135,17 +154,18 @@ class CacheClassType(object):
         keys = inst.get_cache_keys()
 
         # Caching using the primary key
-        prim_key = cls._modify_key(keys.__next__())
+        prim_key = cls._add_class_name_to_key(keys.__next__())
 
         # Make sure it's not in cache already
         if prim_key in cls._cache_content:
             return cls._cache_content[prim_key].content
 
-        cls._cache_content[prim_key] = cls._container(inst)
+        container = cls._container(inst)
+        cls._cache_content[prim_key] = container
 
         # Add the other keys in the cache
         for k in keys:
-            cls._prim_id_for_second_id[k] = prim_key
+            cls._cache_for_second_id[k] = container
 
         # Return the content of the cache
         return cls._cache_content[prim_key].content
@@ -167,7 +187,7 @@ class CacheClassType(object):
 
         # Add the other keys in the cache
         for k in keys:
-            cls._prim_id_for_second_id.pop(k)
+            cls._cache_for_second_id.pop(k)
 
     @staticmethod
     def cache_inst_from_key(key):
@@ -182,16 +202,16 @@ class CacheClassType(object):
         def decorator(func):
             def wrapper(cls, *args, **kwargs):
                 # Craft the cache key from hashable inputs
-                cache_key = cls.__craft_key(key, args, kwargs)
-                keys = cls.keys()
+                cache_key = cls.__craft_key_with_args(key, args, kwargs)
+                keys = cls.keys_names()
 
                 # Try to retrieve from cache
                 if key != keys.__next__():
                     # It's a secondary key
-                    second_key = cls._modify_key((key, cache_key))
+                    second_key = cls._add_class_name_to_key((key, cache_key))
 
                     try:
-                        cache_key = cls._prim_id_for_second_id[second_key]
+                        cache_key = cls._cache_for_second_id[second_key]
                     except KeyError:
                         cache_key = None
 
@@ -217,7 +237,8 @@ class CacheClassType(object):
 
                 args_key = args + (cls._kwd_mark,) + \
                            tuple(sorted(kwargs.items()))
-                cache_key = cls._modify_key((func.__name__, args_key))
+                input_function_key = (func.__name__, args_key)
+                cache_key = cls._add_class_name_to_key(input_function_key)
 
                 # Try to retrieve from cache
                 if cache_key in cls._condition_cache:
@@ -236,7 +257,8 @@ class CacheClassType(object):
                     # Appends the cached instance to the result
                     inst = cls._insert_inst_in_cache(r)
                     inst_prim_key = inst.get_cache_keys().__next__()
-                    keys_to_cache.append(cls._modify_key(inst_prim_key))
+                    mod_key = cls._add_class_name_to_key(inst_prim_key)
+                    keys_to_cache.append(mod_key)
                     yield inst
 
                 # Add the condition to the cache
@@ -283,7 +305,7 @@ class CacheClassType(object):
 class SessionCacheClassType(CacheClassType):
 
     @classmethod
-    def keys(cls):
+    def keys_names(cls):
         raise NotImplementedError()
 
     def keys_from_inst(self):
@@ -297,7 +319,7 @@ class SessionCacheClassType(CacheClassType):
     @classmethod
     def from_session_id(cls, sid):
         try:
-            second_key = cls._modify_key(sid)
+            second_key = cls._add_class_name_to_key(sid)
             prim_key = cls._prim_id_for_session_key[second_key]
             return cls._cache_content[prim_key].content
         except KeyError:
@@ -305,10 +327,11 @@ class SessionCacheClassType(CacheClassType):
 
     def set_session_id(self, sid):
 
-        k = self._modify_key(sid)
+        k = self._add_class_name_to_key(sid)
         inst = self._insert_inst_in_cache(self)
         self.__session_key__ = k
-        prim_key = self._modify_key(inst.get_cache_keys().__next__())
+        prim_key = inst.get_cache_keys().__next__()
+        prim_key = self._add_class_name_to_key(prim_key)
         self._prim_id_for_session_key[k] = prim_key
 
     def remove_session_id(self):
