@@ -35,7 +35,7 @@ class CacheTest(CacheClassType):
     @CacheClassType.cache_inst_from_key('id')
     def from_id_wrong(cls, uid):
 
-        return 'wrong_output'
+        return uid
 
     @classmethod
     @CacheClassType.cache_inst_from_key('id')
@@ -72,6 +72,17 @@ class CacheTest(CacheClassType):
                 pass
 
         return res
+
+    @classmethod
+    @CacheClassType.cache_inst_from_condition
+    def from_type_generator(cls, type_name):
+
+        for d in test_data:
+            try:
+                if d['type'] == type_name:
+                    yield cls(d)
+            except KeyError:
+                pass
 
     @classmethod
     @CacheClassType.cache_inst_from_condition
@@ -156,8 +167,12 @@ class TestCache(unittest.TestCase):
         inst_from_cache = CacheTest.from_id(1)
         assert inst1 is inst_from_cache
 
-        # Test from another key
+        # Reset the cache
+        CacheTest.delete_cache()
+
+        # Test from multiple keys
         inst_from_cache = CacheTest.from_name_and_type('num1', 'int')
+        inst1 = CacheTest.from_name_and_type('num1', 'int')
         assert inst1 is inst_from_cache
 
         # Test with a instance with missing secondary keys
@@ -172,11 +187,19 @@ class TestCache(unittest.TestCase):
 
         inst1 = CacheTest.from_id(1)
 
+        # Test list function
         insts = CacheTest.from_type('int')
 
         assert inst1 in insts
 
-        insts = CacheTest.from_type('int')
+        for inst in insts:
+            self.assertIsInstance(inst, CacheTest)
+
+        # Test generator function
+        insts = CacheTest.from_type_generator('int')
+
+        for inst in insts:
+            self.assertIsInstance(inst, CacheTest)
 
         assert inst1 in insts
 
